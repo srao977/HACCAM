@@ -1,13 +1,13 @@
 # HACCAM Core Runtime System Design V0.1
 
-**Title:** HACCAM Core Runtime System Design V0.1  
-**Document filename:** `HACCAM_CORE_RUNTIME_SYSTEM_DESIGN_V0_1_090926.md`  
-**Date:** 2026-09-09  
-**Version:** V0.1  
-**Status:** **PROPOSED FOR HUMAN REVIEW**  
-**Implementation:** **NOT YET AUTHORIZED**  
-**Parent Architecture Authority:** `HACCAM_PROCESS_MODEL_V0_1_090726.md`, dated 2026-09-07, V0.1, PROPOSED FOR HUMAN REVIEW  
-**Purpose:** Define the complete first HACCAM Core realtime runtime design from which a later Go server and protobuf contract can be implemented without inventing architecture.  
+**Title:** HACCAM Core Runtime System Design V0.1
+**Document filename:** `HACCAM_CORE_RUNTIME_SYSTEM_DESIGN_V0_1_090926.md`
+**Date:** 2026-09-09
+**Version:** V0.1
+**Status:** **APPROVED**
+**Implementation:** **NOT YET AUTHORIZED**
+**Parent Architecture Authority:** `HACCAM_PROCESS_MODEL_V0_1_090726.md`, dated 2026-09-07, V0.1, PROPOSED FOR HUMAN REVIEW
+**Purpose:** Define the complete first HACCAM Core realtime runtime design from which a later Go server and protobuf contract can be implemented without inventing architecture.
 **Scope:** One domain-neutral HACCAM Core runtime, the existing `Fin_FeedSat_1` Producer boundary, external Consumer delivery, and the implementation seams needed for later TransSat and ObsSat participation. This document does not implement any runtime, proto, satellite, persistence, or deployment.
 
 ## Executive Summary
@@ -16,10 +16,10 @@ This document is subordinate to the HACCAM Process Model. The Process Model defi
 
 The first HACCAM Core is one domain-neutral Go server/runtime containing:
 
-- configured, in-memory H-02 satellite records;
+- configured, in-memory H-02 Registry KB knowledge for internal/external participants and services;
 - an in-memory H-03 contract catalog and compatibility rules;
 - in-memory H-04 subscriptions;
-- H-05 route governance and bounded asynchronous delivery;
+- H-05 Routing Table governance and bounded asynchronous `RouterService` publication;
 - latest-state-only H-06 Intelligence Mirrors;
 - H-07 lifecycle state;
 - H-08 isolation at adapter, event, route, and receiver boundaries;
@@ -28,15 +28,15 @@ The first HACCAM Core is one domain-neutral Go server/runtime containing:
 
 The first H-01 adapter is specific to the existing `finfeedsat.v1` gRPC boundary. It connects as a client to `Fin_FeedSat_1` and listens to `StreamDecisions`, `StreamPriceEvents`, and `StreamVolumeEvents`. The FeedSat is not changed to push into HACCAM. The adapter validates participant, contract, message identity, and routing-relevant provenance, then preserves the satellite-owned serialized protobuf message without translating its science into a HACCAM schema. Generated satellite protobuf types remain satellite-owned edge contracts.
 
-The first external HACCAM server boundary is intentionally small: an external Consumer identifies itself and expresses H-04 interest, and HACCAM streams permitted Matrix-visible information through H-05_deliver. H-02, H-03, and H-04 govern route creation; they are not data stages. H-06 is updated before delivery eligibility is evaluated. Each delivery stream has a bounded queue and independent goroutine. A full queue drops delivery for that receiver, records the failure, and never blocks H-01, H-06, another route, or satellite science.
+The first external HACCAM server boundary is intentionally small: an external Consumer identifies itself and expresses H-04 interest, H-05_def/gov derives Routing Table rows from the H-02 Registry KB, H-03 compatibility, and that intent, and the HACCAM-owned `RouterService` executes H-05_deliver publication. The Registry KB, Routing Table, and `RouterService` are distinct. H-06 is updated before `RouterService` delivery eligibility is evaluated. Each destination stream has a bounded queue and independent goroutine. A full queue drops delivery for that receiver, records the failure, and never blocks H-01, H-06, another route, or satellite science.
 
 The strongest runtime invariant is:
 
-> HACCAM governs participant identity, semantic and contract compatibility, registration, subscription, routing, mirroring, lifecycle, failure isolation, diagnostics, and delivery. HACCAM does not determine how many satellites exist, how many entities a satellite owns, how many information streams it publishes, or what authoritative information a satellite chooses to create.
+> HACCAM governs participant identity, service and contract compatibility, registration, subscription, routing, mirroring, lifecycle, failure isolation, diagnostics, and delivery. HACCAM does not determine how many satellites exist, how many entities a satellite owns, how many information streams it publishes, or what authoritative information a satellite chooses to create.
 
 Accordingly, the design supports `0..N FeedSat`, `0..N TransSat`, and `0..N ObsSat`. It contains no AAPL, MSFT, NVDA, or AMZN enum, constant, route, mirror slot, or assumption. Those are current `Fin_FeedSat_1` configuration facts. The local FeedSat code supports a configurable symbol set and currently defaults to one symbol; its current four-symbol live configuration does not become HACCAM architecture.
 
-V0.1 is realtime and in-memory. Restart loses registrations derived at runtime, subscriptions, routes, lifecycle observations, mirrors, delivery queues, counters, and diagnostic continuity. Configured satellite and contract definitions are reconstructed from configuration. Producer streams are reconnected and mirrors rebuild only from each Producer's current catch-up and subsequent live events. No replay, exactly-once, durable history, or restoration is claimed.
+V0.1 is realtime and in-memory. Restart loses runtime availability evidence, subscriptions, derived Routing Table rows, lifecycle observations, mirrors, delivery queues, counters, and diagnostic continuity. Configured Registry KB and contract definitions are reconstructed from configuration. Producer streams are reconnected and mirrors rebuild only from each Producer's current catch-up and subsequent live events. No replay, exactly-once, durable history, or restoration is claimed.
 
 ## 1. Authority, Precedence, and Document Relationship
 
@@ -135,11 +135,11 @@ The adapter must not call `TriggerGapFill`; that RPC mutates FeedSat ingestion a
 | :--- | :--- | :--- |
 | Satellite scientific intelligence | producing satellite | producing satellite |
 | H-01 boundary acceptance and metadata extraction | H-01 | does not interpret or replace source scientific authority |
-| Satellite record | H-02 | HACCAM for its registry fact |
+| Participant, service, endpoint, and capability knowledge | H-02 | HACCAM for its Registry KB fact |
 | HACCAM-visible contract compatibility | H-03 | H-03 |
 | Subscription intent | H-04 | H-04 |
-| Permitted route | H-05_def/gov | H-05_def/gov |
-| Delivery queue/state | H-05_deliver | H-05_deliver |
+| Routing Table row / permitted route | H-05_def/gov | H-05_def/gov |
+| `RouterService` publication queue/state | H-05_deliver | H-05_deliver |
 | Intelligence Mirror object | H-06 | H-06 owns the mirror; source satellite owns mirrored meaning |
 | Lifecycle view | H-07 | H-07; source health remains source-owned |
 | Isolation/drop decision | H-08 | H-08 |
@@ -155,7 +155,7 @@ The minimal internal runtime record contains only HACCAM-owned metadata plus an 
 - source `satellite_id`;
 - Domain Plane identifier;
 - opaque source entity identifier;
-- routing identity derived from the satellite-owned contract's published message/service identity;
+- source service identity and exact satellite-owned message identity;
 - satellite-owned contract identity and version registered by H-03;
 - source event identity when supplied;
 - source sequence and a boolean indicating whether one was supplied;
@@ -180,7 +180,7 @@ metadata + unchanged satellite-owned encoded message
         |
         +--> H-06 mirror replacement
         |
-        +--> H-05_deliver route matching and bounded fan-out
+        +--> H-05_deliver `RouterService` publication through active Routing Table rows
 
 HACCAM runtime record
         |
@@ -200,21 +200,27 @@ This separation prevents FeedSat code generation, field layout, defaults, and Fi
        |       |       |
        +-------+-------+
                |
-         H-01 adapters                 H-02 Registry
-               |                       H-03 Contract / Dictionary
-               v                       H-04 Subscriptions
-                                governed runtime record               |
-                         metadata + encoded message             v
-               |                       H-05_def/gov
-               v                              |
-       H-06 Intelligence Mirror --------------+
+         H-01 adapters
                |
                v
-        H-05_deliver fan-out
-          |       |       |
-          +-------+-------+
-                  |
-          N Consumer satellites
+      governed runtime record
+     metadata + encoded message
+               |
+               v
+      H-06 Intelligence Mirror ---------------------+
+                                                    |
+H-02 Registry KB --------+                          |
+H-03 Contract Governance +--> H-05_def/gov          |
+H-04 Subscription Intent +         |                |
+                                   v                |
+                             ROUTING TABLE <---------+
+                                   |
+                                   v
+                                                                        RouterService / H-05_deliver
+                           |       |       |
+                           +-------+-------+
+                                   |
+                           N Consumer satellites
 
 H-07 Health & Lifecycle, H-08 Failure Isolation, and H-09 Diagnostics
 cross-cut adapters, state, governance, mirror updates, and delivery.
@@ -246,7 +252,7 @@ HACCAM validation, mirror, and routing
 - HACCAM owns the outbound `grpc.ClientConn`, stream contexts, reconnect loop, and adapter goroutines.
 - One adapter supervisor exists per configured Producer endpoint.
 - The supervisor dials with a child context and finite dial timeout.
-- After connection, it verifies registered contract compatibility once, polls H-07 evidence independently, and starts one stream worker per configured routing/message identity.
+- After connection, it verifies registered contract compatibility once, polls H-07 evidence independently, and starts one stream worker per configured source service/message identity.
 - Each stream worker receives a satellite-owned message, extracts only approved routing/provenance metadata, serializes the unchanged message under its registered contract/message identity, and submits the runtime record to one bounded adapter-to-core queue.
 - The queue has a configured positive bound. A full queue rejects that event, increments `ingress_rejected_total{reason="queue_full"}`, marks the adapter degraded, and does not block the FeedSat receive loop beyond the immediate nonblocking attempt.
 - Connection or all-required-stream failure transitions the participant to `disconnected`; one optional-stream failure may transition it to `degraded`.
@@ -260,7 +266,7 @@ For each event the adapter validates:
 1. configured source satellite exists and is a Producer-capable `SubscriberType`;
 2. source Domain Plane and edge contract match H-02/H-03 configuration;
 3. source entity identifier is nonempty;
-4. routing identity is registered to the exact satellite-owned service/message identity in H-03;
+4. source service and message identities are registered with the exact satellite-owned contract/version in H-02/H-03;
 5. the declared satellite-owned contract and version are approved for that Producer;
 6. routing-relevant identifiers required by the registered adapter rule are present;
 7. source provenance is preserved without assigning stronger semantics or normalizing source time;
@@ -270,7 +276,7 @@ H-01 does not validate scientific enum choices, outcome coherence, mathematics, 
 
 ### 6.4 Sequence and duplicate handling
 
-- `accepted_sequence` is retained as source provenance and compared only within `(satellite, entity, routing identity, adapter connection generation)`.
+- `accepted_sequence` is retained as source provenance and compared only within `(satellite, source service, contract/version, message identity, entity, adapter connection generation)`.
 - It is not treated as a global HACCAM sequence.
 - Exact repeated nonempty `event_id` values within a bounded in-memory recent-ID set for the same mirror key are rejected as duplicates.
 - A lower/equal sequence with a different event ID is diagnosed as regression/ambiguity and rejected unless the H-03 adapter rule explicitly permits it.
@@ -279,38 +285,52 @@ H-01 does not validate scientific enum choices, outcome coherence, mathematics, 
 
 ### 6.5 Producer failure and recovery
 
-On Producer disconnect, existing mirrors remain as last received values but are marked unavailable-by-disconnect in HACCAM metadata; HACCAM does not rewrite the preserved satellite-owned message. Routes remain defined but no new source information is delivered. On recovery, catch-up and live events update mirrors normally.
+On Producer disconnect, existing mirrors remain as last received values but are marked unavailable-by-disconnect in HACCAM metadata; HACCAM does not rewrite the preserved satellite-owned message. Corresponding Routing Table rows may remain represented for diagnostics but are not active for publication while source availability is invalid. On recovery, H-05_def/gov can reactivate valid rows and catch-up/live events update mirrors normally.
 
-## 7. H-02 Satellite Registry
+## 7. H-02 Registry Knowledgebase
 
 ### 7.1 V0.1 model
 
-The registry is in-memory and supports N records. V0.1 records are loaded from HACCAM configuration; Consumer stream establishment activates a configured record but does not invent an unconfigured identity.
+H-02 is the in-memory HACCAM Registry Knowledgebase (Registry KB) of known participants, services, endpoints, capabilities, and runtime relationship evidence needed by Core. It represents both external HACCAM participants and internal HACCAM-owned service providers. V0.1 knowledge is loaded from validated HACCAM configuration and augmented with H-07 availability/lifecycle evidence; establishing a Consumer stream activates known capability but does not invent an unconfigured participant or service.
 
-| Field | HACCAM reason |
+The internal model distinguishes these concepts without requiring public protobuf messages:
+
+| Concept | HACCAM knowledge |
 | :--- | :--- |
-| `satellite_id` | unique participant identity and mirror/route provenance |
-| `SatelliteRole` | Process Model ontology validation |
-| `SubscriberType` | explicit Producer/Consumer relationship capability |
-| Domain Plane | semantic compatibility boundary |
-| endpoint, when HACCAM connects outward | H-01 Producer connection |
-| edge contract identity/version | H-03 adapter compatibility |
-| advertised routing/message identities | identities derived from satellite-owned contracts for route governance; never a parallel scientific taxonomy or command to produce |
-| lifecycle state | H-07 view |
-| configured/connected evidence | distinguish declaration from runtime observation |
+| Participant | stable identity and `internal HACCAM service` or `external satellite` classification; `satellite_id`, `SatelliteRole`, and `SubscriberType` exist only for satellites |
+| ServiceProvider | participant-to-service relationship and provider capability |
+| ServiceConsumer | participant-to-service/message relationship and consumer capability |
+| ServiceEndpoint | service address/transport where a network endpoint applies; an in-process capability need not have one |
+| ContractCapability | published or accepted satellite-owned contract identity/version plus service/message identities |
+| Runtime evidence | configured, available, connected, degraded, or unavailable evidence supplied through H-07 |
 
-No generic metadata bag, lease protocol, tags, ownership team, or scientific parameters are included.
+One participant may expose multiple services; one service may publish multiple message identities; one satellite may be both provider and consumer; and an internal HACCAM component may provide a service without becoming a satellite. Participant identity, service identity, endpoint, contract capability, and provider/consumer relationship are separate facts. Physical host/process/device identity is not substituted for any of them.
 
-### 7.2 Rules
+The Registry KB knows **who exists, what service they provide or consume, where a network service can be reached, and which contracts/messages they publish or accept**. It does not contain scientific schemas, calculations, value-correctness rules, or algorithm meaning. It is a knowledge source for routing governance, not the Routing Table and not a delivery engine.
 
-- `satellite_id` is nonempty and unique. Duplicate configured identities fail HACCAM startup.
-- Role and subscriber type must be explicit; protobuf `UNSPECIFIED` is rejected.
+### 7.2 First configured knowledge example
+
+| Provider / Consumer | Classification | Role / SubscriberType | Service and direction | Contract/message capability | Availability |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| `Fin_FeedSat_1` | external satellite | FeedSat / `PRODUCER` | existing `ModelService` gRPC publication; inbound to HACCAM through H-01 | existing `Fin_FeedSat_1`-owned contract; publishes `finfeedsat.v1.DecisionEvent`, `finfeedsat.v1.PriceEvent`, and `finfeedsat.v1.VolumeEvent` | derived from H-07 runtime health/lifecycle evidence |
+| `RouterService` | internal HACCAM service | none; not a satellite | HACCAM-owned gRPC publishing service; outbound from HACCAM | publishes permitted HACCAM delivery representations while preserving source contract/message identity | derived from Core/H-07 service evidence |
+| Decision Strategy Engine (DSE) | external satellite | TransSat / `PRODUCER_CONSUMER` | Consumer stream endpoint; receives from `RouterService` and may later publish authoritative DSE output through H-01 | consumes selected `Fin_FeedSat_1` service/message identities; later output uses a DSE-owned contract | derived from H-07 runtime health/lifecycle evidence |
+
+These are first configuration examples only. The Registry KB supports `0..N` FeedSats, TransSats, ObsSats, internal HACCAM services, services per participant, and routes without Core scientific code changes.
+
+### 7.3 Rules
+
+- Every participant and service identity is nonempty and unique in its configured scope. A satellite also has a unique nonempty `satellite_id`.
+- External satellites require explicit non-`UNSPECIFIED` role and subscriber type. Internal HACCAM services have neither and must not be forced into satellite enums.
 - `PRODUCER` and `PRODUCER_CONSUMER` may advertise information.
 - `CONSUMER` and `PRODUCER_CONSUMER` may establish subscriptions.
-- Endpoint is required only for an HACCAM-owned outbound adapter.
-- Replacement means lifecycle reconnection of the same configured identity, not silent registration of a new participant.
+- An endpoint is required only where the configured transport crosses an applicable process/device/network boundary.
+- Replacement means lifecycle reconnection of the same configured participant/service identity, not silent registration of a new participant.
 - A Domain Plane mismatch prevents route creation; it does not rewrite the participant.
 - Removing a configured participant is a configuration restart operation in V0.1.
+- H-02 supplies knowledge to H-05_def/gov but never creates, owns, or executes Routing Table rows.
+
+The H-02 Registry KB is an internal runtime capability, not a V0.1 network service. No `RegistryService`, registration RPC, or service-discovery RPC is proposed. The network-capable HACCAM-owned outbound publisher is `RouterService`, described under H-05_deliver.
 
 ## 8. H-03 Contract / Dictionary
 
@@ -320,7 +340,6 @@ H-03 is not a proto file. It governs contract identity, compatibility, participa
 
 For each routable satellite publication, the in-memory catalog records:
 
-- a routing identity derived from or explicitly associated with the satellite-owned service/message identity;
 - Domain Plane;
 - permitted publisher identity, `SatelliteRole`, and `SubscriberType`;
 - satellite-owned contract identity/version;
@@ -329,15 +348,15 @@ For each routable satellite publication, the in-memory catalog records:
 - permitted Consumer contracts and subscription relationships;
 - compatibility rule: exact in V0.1 unless explicitly approved otherwise.
 
-Routing identity is not scientific semantic ownership. It distinguishes publications so H-04 and H-05 can match a Consumer that already understands the satellite-owned contract. H-03 does not define what `V_N`, `Q_G`, strength, Price prediction, Volume phase, or any other scientific value means; it does not calculate or judge those values.
+V0.1 has no separate route or routing identity namespace: exact participant, service, contract/version, message identity, Domain Plane, destination/subscription, and optional entity-filter facts provide the routing dimensions. H-03 decides service/contract/message compatibility; it does not store resolved routes or inspect scientific meaning. H-03 does not define what `V_N`, `Q_G`, strength, Price prediction, Volume phase, or any other scientific value means; it does not calculate or judge those values.
 
 ### 8.2 Finance evidence classification
 
 | Current FeedSat concept | Classification | HACCAM use |
 | :--- | :--- | :--- |
-| `DecisionEvent` and nested Adaptive terms | Finance Domain Plane, FeedSat-owned scientific contract | preserved encoded message; routing identity references `finfeedsat.v1.DecisionEvent` |
-| `PriceEvent`, emission, cockpit, skip | Finance Domain Plane, FeedSat-owned scientific contract | preserved encoded message; routing identity references `finfeedsat.v1.PriceEvent` |
-| `VolumeEvent`, quantities, indicator, phase | Finance Domain Plane, FeedSat-owned scientific contract | preserved encoded message; routing identity references `finfeedsat.v1.VolumeEvent` |
+| `DecisionEvent` and nested Adaptive terms | Finance Domain Plane, FeedSat-owned scientific contract | preserved encoded message identified as `finfeedsat.v1.DecisionEvent` |
+| `PriceEvent`, emission, cockpit, skip | Finance Domain Plane, FeedSat-owned scientific contract | preserved encoded message identified as `finfeedsat.v1.PriceEvent` |
+| `VolumeEvent`, quantities, indicator, phase | Finance Domain Plane, FeedSat-owned scientific contract | preserved encoded message identified as `finfeedsat.v1.VolumeEvent` |
 | `symbol`, `event_id`, `market_snapshot_id`, timestamps | shared-canonical candidates/evidence | identity and provenance where present |
 | `accepted_sequence` | FeedSat-local publication cursor | scoped provenance, not global order |
 | Feed/Component health enums | edge health vocabulary | adapted into H-07 evidence, not science |
@@ -360,8 +379,9 @@ A V0.1 subscription contains:
 - subscriber `satellite_id`;
 - Domain Plane;
 - zero or more source `satellite_id` filters (empty means any compatible source in that Domain Plane);
+- zero or more source service identity filters (empty means any compatible service from matched sources);
 - zero or more exact entity filters (empty means any entity from matched sources);
-- one or more routing identities associated with satellite-owned contract/message identities;
+- one or more exact satellite-owned message identities and accepted contract identities/versions;
 - lifecycle: active, cancelling, removed;
 - creation and removal timestamps.
 
@@ -371,6 +391,8 @@ For the first server-streaming boundary, the subscription lifetime equals the RP
 
 ## 10. H-05 Routing & Distribution
 
+H-05 contains two distinct subordinate responsibilities and one derived operational state. H-05_def/gov constructs and maintains the Routing Table. H-05_deliver executes outbound publication through the HACCAM-owned `RouterService`. `RouterService` is logically internal to HACCAM ownership but may cross process, device, or network boundaries through gRPC; it is not a Satellite or Domain Plane scientific processor.
+
 ### 10.1 H-05_def/gov
 
 H-05_def/gov creates a permitted route only when all are true:
@@ -379,18 +401,40 @@ H-05_def/gov creates a permitted route only when all are true:
 2. H-02 receiver exists and may consume;
 3. source and receiver Domain Plane association is compatible;
 4. H-03 recognizes the satellite-owned contract/version/message identity and confirms Consumer compatibility;
-5. H-04 records receiver interest matching source, entity, and routing identity;
+5. H-04 records receiver interest matching source participant/service, message identity, contract, and any entity filter;
 6. the route does not point a satellite directly to a peer publication boundary.
 
-Route definitions are recomputed when a subscription starts/ends, participant lifecycle changes, or applicable configured contract state changes. Governance is not a per-event synchronous pipeline.
+H-05_def/gov produces and maintains the Routing Table from H-02 Registry KB facts, H-03 compatibility decisions, and H-04 subscription intent. The subscription is a Consumer's **WHO wants WHAT** intent; a Routing Table row is the resolved, permitted source-to-destination relationship. Subscription creation alone never authorizes delivery.
 
-### 10.2 H-05_deliver
+A minimal conceptual Routing Table row is:
+
+| Field | Ownership / purpose |
+| :--- | :--- |
+| source provider identity | Registry KB participant/provider reference |
+| source `satellite_id` | present only when the source is a satellite |
+| source service identity | exact publishing service |
+| source contract identity/version | exact satellite-owned contract governed by H-03 |
+| message identity | exact satellite-owned message identity |
+| destination provider/consumer identity | Registry KB destination participant reference |
+| destination `satellite_id` | present only when the destination is a satellite |
+| destination service identity | exact `RouterService`-facing Consumer service/stream relationship |
+| Domain Plane | compatibility boundary copied from resolved facts |
+| subscription identity | H-04 intent from which the row was resolved |
+| optional entity filter | exact filter copied from the subscription |
+| route state and availability relationship | active, disabled, or removing state resolved from relevant participant/service availability evidence |
+| `created_at_unix_ms`, `updated_at_unix_ms` | HACCAM-owned row lifecycle times |
+
+The table is dynamic and cardinality-independent. Each row is identified by its concrete governed source, destination, contract/message, Domain Plane, subscription, entity-filter, and state facts; V0.1 adds no synthetic route identifier. It is resolved delivery topology, not participant knowledge storage, service discovery, contract interpretation, or scientific meaning. Rows are created, updated, disabled, or removed when subscriptions, Registry KB availability/capabilities, or H-03 decisions change. Governance is not a per-event synchronous pipeline.
+
+### 10.2 H-05_deliver and `RouterService`
+
+`RouterService` is the higher-level HACCAM-owned gRPC outbound publishing service and the external/network expression of H-05_deliver; it is not the entirety of H-05. It obtains active Routing Table rows and publishes H-06 current/live Matrix-visible information to authorized destinations. It does not own Registry KB facts, decide contract compatibility, create subscription intent, alter satellite science, or create peer shortcuts. It is not the Registry KB, the Routing Table, a mere queue, a Satellite, or a scientific processor.
 
 For every active external subscription stream:
 
 - one bounded queue is owned by H-05_deliver;
 - one sender goroutine is the sole receiver from and closer-user of that queue;
-- mirror update processing performs a nonblocking enqueue per matching route;
+- H-05_deliver obtains matching active Routing Table rows and performs a nonblocking enqueue per destination;
 - the immutable runtime record can be referenced by multiple queues;
 - sender serialization copies HACCAM metadata and the unchanged encoded satellite-owned message into the outbound delivery message, then calls `Send`;
 - stream context cancellation or send failure removes the subscription/routes and terminates the sender;
@@ -403,9 +447,11 @@ No retry is performed for an individual dropped realtime value. Retrying into th
 
 H-05 never decodes, changes, or assigns scientific meaning to the encoded message. The Consumer uses the delivered satellite-owned contract version and message identity to decode the exact scientific contract it subscribed to.
 
+For each accepted HACCAM-visible event: H-06 first contains the current mirror; H-05_def/gov has already resolved permitted routes; `RouterService`/H-05_deliver obtains matching active rows; `RouterService` publishes to each authorized destination through isolated bounded delivery state; and the unchanged satellite-owned encoded message is delivered with only HACCAM-owned delivery/provenance metadata. Failure of one destination does not affect another.
+
 ### 10.3 Fan-out and route removal
 
-Fan-out iterates a snapshot of matching routes under no route lock while enqueueing. Route table mutation uses copy-on-write or a short `RWMutex`; no network send occurs while holding it. Removal marks a route closed, detaches it from future snapshots, then signals its sender context. Only the route owner closes its queue, preventing send-on-closed-channel races.
+Fan-out iterates a snapshot of matching active Routing Table rows under no route lock while enqueueing. Routing Table mutation uses copy-on-write or a short `RWMutex`; no network send occurs while holding it. Removal marks a row removing, detaches it from future snapshots, then signals its sender context. Only the delivery owner closes its queue, preventing send-on-closed-channel races.
 
 ## 11. H-06 Intelligence Mirror
 
@@ -414,10 +460,11 @@ Fan-out iterates a snapshot of matching routes under no route lock while enqueue
 The key is exactly:
 
 ```text
-(source satellite_id, source entity identifier, routing identity)
+(source satellite_id, source service identity, source contract identity/version,
+ message identity, source entity identifier)
 ```
 
-No fixed satellite, entity, or routing/message-identity cardinality exists.
+No fixed satellite, service, contract, message, or entity cardinality exists. The mirror key is derived from source identity and contract facts; it is not a Routing Table row or a separate route/routing identity namespace.
 
 ### 11.2 Mirror value
 
@@ -498,7 +545,7 @@ Required events/counters:
 - adapter failure/panic;
 - current counts for satellites by lifecycle, mirrors, subscriptions, routes, and delivery queue occupancy.
 
-Logs include `satellite_id`, Domain Plane, routing/message identity, entity where safe, subscription/route identity, and source event identity where supplied. They do not log encoded scientific messages by default. Diagnostics are realtime and are lost on restart.
+Logs include participant/service identity, `satellite_id` where applicable, Domain Plane, contract/message identity, entity where safe, subscription identity, route state, and source event identity where supplied. These concrete dimensions identify the affected relationship without another identity namespace. Logs do not include encoded scientific messages by default. Diagnostics are realtime and are lost on restart.
 
 ## 15. External Satellite Relationships
 
@@ -519,21 +566,33 @@ Fin_FeedSat_1 science
 ### 15.2 Consumer path
 
 ```text
-configured Consumer identity (H-02)
-        + H-04 WHO wants WHAT
-        + H-03 compatibility
-                    |
-                    v
-              H-05_def/gov
-                    |
-H-06 latest/live --> H-05_deliver --> Consumer satellite
-                      bounded async
+External Producer: Fin_FeedSat_1
+                     |
+                     v
+                    H-01
+                     |
+                     v
+                    H-06 -----------------------------+
+                                                                   |
+H-02 Registry KB --------+                         |
+H-03 Contract Governance +--> H-05_def/gov         |
+H-04 Subscription Intent +         |               |
+                                             v               |
+                                     ROUTING TABLE <--------+
+                                             |
+                                             v
+                                  RouterService / H-05_deliver
+                                             |
+                                             v
+                                 External Consumer: DSE
 ```
+
+H-07 lifecycle evidence, H-08 isolation, and H-09 diagnostics cross-cut this flow. H-02, H-03, and H-04 inform route governance and are not per-event data stages.
 
 ### 15.3 Producer+Consumer path
 
 ```text
-H-05_deliver --> TransSat consumes Matrix-visible information
+RouterService / H-05_deliver --> TransSat consumes Matrix-visible information
                          |
                          v
                  TransSat-owned science
@@ -552,7 +611,7 @@ There is no peer-satellite shortcut and no feedback into FeedSat scientific stat
 
 ### 15.4 Internal HACCAM use
 
-H-06 and H-05 observe the same accepted immutable runtime record produced by H-01: HACCAM-owned metadata plus the unchanged encoded satellite-owned message. H-06 owns latest-state replacement; H-05_deliver receives notification after replacement. H-07 and H-09 receive evidence through nonblocking internal calls/counters. These responsibilities are not Satellites, do not subscribe through an external satellite RPC, and do not form a second routing architecture or scientific model.
+H-06 and `RouterService`/H-05_deliver observe the same accepted immutable runtime record produced by H-01: HACCAM-owned metadata plus the unchanged encoded satellite-owned message. H-06 owns latest-state replacement; H-05_deliver receives notification after replacement and consults the Routing Table. H-05_def/gov consumes H-02/H-03/H-04 facts, not scientific event content. H-07 and H-09 receive evidence through nonblocking internal calls/counters. These responsibilities are not Satellites, do not subscribe through an external satellite RPC, and do not form a second routing architecture or scientific model.
 
 ### 15.5 Co-located satellites
 
@@ -564,7 +623,7 @@ one Android application or host
         +-- Decision Strategy Engine (TransSat / PRODUCER_CONSUMER)
 
 required logical path:
-Fin_FeedSat_1 -> H-01 -> HCM -> H-05_deliver -> Decision Strategy Engine
+Fin_FeedSat_1 -> H-01 -> HCM -> Routing Table -> RouterService/H-05_deliver -> Decision Strategy Engine
 ```
 
 An in-process transport optimization may be considered only if it implements the same H-01/H-03/H-04/H-05/H-06 governance and failure boundaries. It may not become a direct scientific shortcut.
@@ -577,12 +636,24 @@ Every proposed element below passes the ownership test: HACCAM owns the service,
 
 ### 16.1 Service inventory and rationale
 
-#### `MatrixDeliveryService` (new proto terminology; human approval required)
+#### `RouterService`
+
+The approved V0.1 design-only service boundary is:
+
+```proto
+service RouterService {
+        rpc StreamMatrixVisibleInformation(SubscriptionRequest)
+                        returns (stream MatrixVisibleInformation);
+}
+```
+
+No protobuf file or generated code is authorized by this declaration.
 
 | Item | Design |
 | :--- | :--- |
 | H-process | H-04 request boundary; H-05_def/gov validation; H-05_deliver execution |
-| Purpose | deliver governed realtime Matrix-visible information to an external configured Consumer |
+| Architectural service | HACCAM-owned `RouterService`: higher-level outbound publisher using active Routing Table state |
+| Purpose | publish governed realtime Matrix-visible information to authorized external Consumers |
 | Caller | satellite with `SubscriberType = CONSUMER` or `PRODUCER_CONSUMER` |
 | Server | HACCAM Core |
 | RPC | `StreamMatrixVisibleInformation(SubscriptionRequest) returns (stream MatrixVisibleInformation)` |
@@ -590,7 +661,9 @@ Every proposed element below passes the ownership test: HACCAM owns the service,
 | Failure | invalid identity/filter: `INVALID_ARGUMENT`; unregistered or wrong subscriber type: `FAILED_PRECONDITION`; incompatible contract: `FAILED_PRECONDITION`; shutdown: `UNAVAILABLE`; cancellation ends subscription |
 | Why network boundary | the Consumer is an external satellite process; H-05 delivery must cross that boundary |
 
-No H-02 registration RPC is required in V0.1 because the registry is configured. No separate create/delete subscription RPC is required because the stream request and context define subscription lifecycle. No diagnostics RPC is required because H-09 uses logs/metrics. Core health should use standard `grpc.health.v1.Health`, not a new HACCAM message.
+`RouterService` names the higher-level HACCAM provider responsibility and remains distinct from the Routing Table and broader H-05 route governance. `StreamMatrixVisibleInformation` expresses H-04 subscription intent at stream establishment, H-05_def/gov route validation/resolution, and H-05_deliver outbound realtime publication. No additional RPC is proposed for V0.1.
+
+No H-02 registration RPC is required in V0.1 because the Registry KB is configured and internal. No separate create/delete subscription RPC is required because the stream request and context define subscription lifecycle. No diagnostics RPC is required because H-09 uses logs/metrics. Core health should use standard `grpc.health.v1.Health`, not a new HACCAM message.
 
 A future satellite publication RPC may be added as another H-01 adapter when a Producer lacks an existing publication boundary. It is not required for the first runtime and is not specified speculatively. This does not change H-01 architecture or internal ingress handling.
 
@@ -605,8 +678,9 @@ Owner: H-04. Producer: external Consumer. Consumers: H-04 and H-05_def/gov.
 | `subscriber_satellite_id` | `string` | required; must match a configured H-02 Consumer-capable identity |
 | `domain_plane` | `string` | required; exact configured association in V0.1 |
 | `source_satellite_ids` | `repeated string` | optional filter; empty means any compatible source in the Domain Plane |
+| `source_service_ids` | `repeated string` | optional filter; empty means any compatible registered source service |
 | `entity_ids` | `repeated string` | optional exact-match filter; empty means any entity |
-| `routing_identity_ids` | `repeated string` | required, nonempty; each identifies a registered satellite-owned message/service identity, not a HACCAM scientific taxonomy |
+| `message_identities` | `repeated string` | required, nonempty; exact satellite-owned protobuf message identities requested by the Consumer |
 | `accepted_contracts` | `repeated ContractIdentity` | required, nonempty; contracts the Consumer can decode |
 
 Required/optional semantics are validated by the server; proto3 field presence alone is not treated as semantic validity. Repeated filters are deduplicated. The request is immutable for a stream; changing interest requires reconnecting with a new request.
@@ -618,9 +692,9 @@ This name directly uses the Process Model term “Matrix-visible information”;
 | Field | Type | Semantics |
 | :--- | :--- | :--- |
 | `source_satellite_id` | `string` | required authoritative Producer identity |
+| `source_service_id` | `string` | required exact publishing service identity |
 | `domain_plane` | `string` | required semantic context |
 | `entity_id` | `string` | required opaque source-owned entity identity |
-| `routing_identity_id` | `string` | required H-03 routing identity associated with the satellite-owned message identity |
 | `contract` | `ContractIdentity` | required satellite-owned contract identity/version |
 | `message_identity` | `string` | required fully qualified satellite-owned protobuf message identity, for example `finfeedsat.v1.DecisionEvent` |
 | `source_event_id` | `string` | optional source identity; empty only when source lacks one |
@@ -637,12 +711,12 @@ The message is a HACCAM delivery representation, not a new semantic information 
 
 #### `ContractIdentity`
 
-Owner of this registration metadata: H-03. Owner of the identified scientific contract: the producing satellite. Producer of the metadata: HACCAM configuration or Consumer request. Consumers: H-03/H-05.
+HACCAM owns only this registration/identification metadata as used by H-03. The producing satellite owns the scientific contract identified by the metadata. Metadata is supplied through HACCAM configuration or a Consumer request and used by H-03/H-05; registration never transfers scientific-contract ownership to HACCAM.
 
 | Field | Type | Semantics |
 | :--- | :--- | :--- |
-| `name` | `string` | required canonical H-03 contract name |
-| `version` | `string` | required exact version in V0.1 |
+| `name` | `string` | required registered identifier of the Producer-owned contract |
+| `version` | `string` | required exact Producer-owned contract version in V0.1 |
 | `proto_package` | `string` | required satellite-owned protobuf package identity |
 
 No generic compatibility range is introduced. Any later range/negotiation requires H-03 design approval.
@@ -677,14 +751,14 @@ These enums belong in `haccam.v1` even though the first delivery RPC does not ca
 
 | Proto Element | Type | Purpose | H-Process Authority | Required for V0.1? | New Term? |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| `haccam.v1` | package | versioned HACCAM edge namespace | H-03 | yes | proto term, approval required |
-| `MatrixDeliveryService` | service | external Consumer delivery | H-04/H-05 | yes | proto term, approval required |
-| `StreamMatrixVisibleInformation` | RPC | subscription lifetime and realtime delivery | H-04/H-05_deliver | yes | proto term, approval required |
-| `SubscriptionRequest` | message | WHO wants WHAT | H-04 | yes | proto term, approval required |
-| `MatrixVisibleInformation` | message | HACCAM metadata plus unchanged encoded satellite-owned message; not a scientific schema | H-03/H-05/H-06 | yes | proto capitalization/name approval required |
-| `ContractIdentity` | message | exact H-03 name/version | H-03 | yes | proto term, approval required |
-| `SatelliteRole` | enum | role ontology | H-02/Process Model | yes | no architectural term; proto spelling approval |
-| `SubscriberType` | enum | relationship classification | H-02/Process Model | yes | no architectural term; proto spelling approval |
+| `haccam.v1` | package | versioned HACCAM edge namespace | H-03 | yes | retained proto term |
+| `RouterService` | service | HACCAM-owned outbound publication using active Routing Table state | H-05_deliver | yes | approved V0.1 proto term |
+| `StreamMatrixVisibleInformation` | RPC | subscription establishment, route resolution, and realtime publication | H-04/H-05_def/gov/H-05_deliver | yes | approved V0.1 proto term |
+| `SubscriptionRequest` | message | WHO wants WHAT | H-04 | yes | retained proto term |
+| `MatrixVisibleInformation` | message | HACCAM metadata plus unchanged encoded satellite-owned message; not a scientific schema | H-03/H-05/H-06 | yes | retained proto term |
+| `ContractIdentity` | message | exact H-03 name/version | H-03 | yes | retained proto term |
+| `SatelliteRole` | enum | role ontology | H-02/Process Model | yes | retained Process Model vocabulary |
+| `SubscriberType` | enum | relationship classification | H-02/Process Model | yes | retained Process Model vocabulary |
 | `grpc.health.v1.Health` | standard service | Core liveness/readiness | H-07 | yes | no |
 | future publication RPC | deferred service/RPC | later H-01 adapter for a Producer needing HACCAM-owned ingress edge | H-01 | no | not proposed now |
 
@@ -697,22 +771,23 @@ Recommended module organization uses a small number of behavior-oriented package
 | `cmd/haccam-core` | composition root | config/signals; starts runtime | root context, startup/shutdown ordering | process | no H-process logic |
 | `internal/core` | accepted-information coordinator | governed runtime record; mirror update then route notification | no long-lived queue beyond configured ingress dispatcher | core invariant boundary | no scientific protobuf definitions, decoding, or science |
 | `internal/adapter/finfeedsat` | first H-01 adapter | `finfeedsat.v1` streams to HACCAM metadata plus unchanged encoded messages | connection supervisor, stream goroutines, bounded ingress queue | per configured Producer | no FeedSat modification, scientific transformation/validation, or routing |
-| `internal/registry` | H-02 | config/lifecycle view; lookups | registry map and lock | startup validation | no discovery, contracts, delivery |
+| `internal/registry` | H-02 | Registry KB of internal/external participants, services, endpoints, provider/consumer relationships, and contract capabilities | knowledge indexes and lock; H-07 evidence view | startup validation / corrupted state isolation | no Routing Table ownership, delivery, or scientific schema |
 | `internal/contract` | H-03 | registered satellite contract/message identities and relationship compatibility | immutable catalog after startup | incompatible contract/version/message | no scientific meaning, mathematics, or payload correctness validation |
 | `internal/subscription` | H-04 | stream requests; subscription snapshots | subscription map and lock | per subscription | no route permission or delivery |
-| `internal/routing` | H-05_def/gov + H-05_deliver | registry/contracts/subscriptions/mirror updates; outbound values | route table, per-stream bounded queue and sender goroutine | per route/receiver | no scientific transformation or semantic ownership |
+| `internal/routing` | H-05_def/gov | Registry KB snapshots, H-03 decisions, H-04 intent; active route snapshots | Routing Table and lock/copy-on-write state | per route-definition operation | no Registry KB ownership, network publication, or science |
+| `internal/router` | H-05_deliver / `RouterService` | active Routing Table rows and H-06 current/live records; outbound gRPC publications | bounded per-destination queues and sender goroutines | per destination/stream | no route permission, Registry KB ownership, contract decision, subscription ownership, or scientific transformation |
 | `internal/mirror` | H-06 | accepted runtime records; latest snapshots | keyed map and `RWMutex` | per update validation before lock | no history, delivery, or scientific transformation |
 | `internal/lifecycle` | H-07 | evidence from adapters/routes/health | sole lifecycle writer; small event queue or synchronized calls | per participant | no scientific status interpretation |
 | `internal/diagnostics` | H-09 and H-08 evidence | structured events/counters | bounded/nonblocking diagnostics | sink | no control over satellite science |
-| `internal/server` | proto boundary | gRPC requests/responses | RPC contexts; delegates queue ownership to routing | per RPC | no internal protobuf model adoption |
+| `internal/server` | `RouterService` proto boundary | gRPC requests/responses | RPC contexts; delegates publication state to `internal/router` | per RPC | no Registry, Routing Table, contract-governance, or internal protobuf model ownership |
 
-H-08 is implemented through boundaries in adapter, core, routing, and diagnostics rather than a package that catches every error.
+Separate `internal/routing` and `internal/router` packages are recommended because route governance and network publication have different state and failure boundaries. One package with rigorously separate components could implement the same architecture; package names do not redefine H-05. H-08 is implemented through boundaries in adapter, core, routing, router, and diagnostics rather than a package that catches every error.
 
 ## 18. Concurrency, Locks, Queues, and Cancellation
 
 ### 18.1 Goroutine ownership
 
-The composition root owns an `errgroup` under one root context. Each adapter supervisor owns its connection and stream worker goroutines. Routing owns one sender goroutine per active external stream. The gRPC server owns request handler goroutines. No goroutine is started without an owner, cancellation path, and join path.
+The composition root owns an `errgroup` under one root context. Each adapter supervisor owns its connection and stream worker goroutines. `RouterService`/H-05_deliver owns one sender goroutine per active external stream. The gRPC server owns request handler goroutines. No goroutine is started without an owner, cancellation path, and join path.
 
 ### 18.2 Channels
 
@@ -741,8 +816,8 @@ HACCAM configuration is a small validated file plus environment overrides for de
 | Category | V0.1 content |
 | :--- | :--- |
 | Core server | listen address; health/metrics address if separate |
-| Satellite bootstrap | N satellite IDs, role, subscriber type, Domain Plane, optional endpoint |
-| Adapter | adapter kind, satellite-owned contract/version/message identities, routing identities, optional entity filters |
+| Registry KB bootstrap | N internal/external participants, satellite role/type where applicable, services, Domain Plane associations, endpoints, and provider/consumer capabilities |
+| Adapter | adapter kind, satellite-owned contract/version/service/message identities, optional entity filters |
 | Contract | H-03 registrations for exact satellite-owned contract/version/message identities and permitted relationships |
 | Queue bounds | ingress, delivery, diagnostics capacities with positive maxima |
 | Reconnect | dial timeout, initial/max backoff, jitter, stable-reset interval |
@@ -761,11 +836,12 @@ Invalid identity, duplicate satellite, invalid role/type, missing required endpo
 ```text
 load and validate HACCAM configuration
   -> construct immutable H-03 contract catalog
-  -> load H-02 configured satellite records as configured
-  -> initialize empty H-06 mirror, H-04 subscriptions, and H-05 routes
+        -> load H-02 configured participant/service knowledge, including `RouterService`
+        -> initialize empty H-06 mirror and H-04 subscriptions
+        -> initialize empty H-05 Routing Table and `RouterService` delivery state
   -> initialize H-07 lifecycle and H-09 diagnostics
   -> bind gRPC/health listeners but report NOT_SERVING
-  -> start H-05 delivery manager and gRPC serving
+        -> start `RouterService`/H-05_deliver and gRPC serving
   -> start H-01 adapter supervisors for configured Producers
   -> adapters transition configured -> connecting -> connected/degraded
   -> report HACCAM Core SERVING when internal components are operational
@@ -824,7 +900,7 @@ This runtime can later support DS-01 by the same H-04/H-05 Consumer delivery bou
 
 ## 23. Domain Neutrality
 
-HACCAM Core understands participant identity, Domain Plane, satellite-owned contract identity/version, routing/message identity, routing-relevant entity identity, provenance, mirror replacement, subscription, and delivery. It does not understand Adaptive, Price, Volume, symbol classification, scientific status, or Finance mathematics.
+HACCAM Core understands participant and service identity, endpoint and capability facts, Domain Plane, satellite-owned contract identity/version and message identity, routing-relevant entity identity, provenance, mirror replacement, subscription intent, resolved routes, and delivery. It does not understand Adaptive, Price, Volume, symbol classification, scientific status, or Finance mathematics.
 
 H-03 registers and governs compatibility around satellite-owned Domain Plane contracts; it does not own their vocabulary or science. The `Fin_FeedSat_1` adapter may reference Finance edge message identities and extract approved routing/provenance fields, but it does not translate their scientific content. Adding a future Domain Plane requires registrations for its satellite-owned contracts/messages and an adapter, not scientific vocabulary in Core or changes to registry, subscription, routing, mirror grain, lifecycle, isolation, or diagnostics.
 
@@ -863,6 +939,13 @@ H-03 registers and governs compatibility around satellite-owned Domain Plane con
 | CORE-INV-29 | HACCAM proto definitions are limited to HACCAM-owned responsibilities and never duplicate Domain Plane scientific schemas. | proto review and dependency tests |
 | CORE-INV-30 | Physical deployment or packaging is not satellite identity. | H-02 identity model, deployment-neutral tests |
 | CORE-INV-31 | Co-located satellites remain independent and use governed HACCAM paths where required. | topology, no shortcut API, integration tests |
+| CORE-INV-32 | H-02 is authoritative HACCAM knowledge of known internal/external participants, services, endpoints, and capabilities; it is not the Routing Table. | Registry KB model and ownership tests |
+| CORE-INV-33 | The Routing Table is HACCAM-owned resolved operational route state derived by H-05_def/gov from H-02, H-03, and H-04 facts. | routing API and route-construction tests |
+| CORE-INV-34 | `RouterService` executes outbound publication only from active Routing Table rows; it does not invent scientific meaning or determine scientific ownership. | `RouterService` boundary and publication tests |
+| CORE-INV-35 | H-02 does not absorb H-05 route ownership, and H-05 does not absorb H-02 knowledgebase ownership. | package/state ownership tests |
+| CORE-INV-36 | H-04 subscription intent and H-05 Routing Table state are distinct objects with distinct lifecycles. | subscription/route tests |
+| CORE-INV-37 | Internal HACCAM services are not Satellites and have no `SatelliteRole` or `SubscriberType`. | Registry KB validation |
+| CORE-INV-38 | V0.1 routing is represented only by concrete Registry KB, contract/version, message, subscription, source/destination, Domain Plane, optional entity-filter, and route-state dimensions. No separate route or routing identity namespace is used. | model/proto review and route-resolution tests |
 
 ## 25. First Implementation Validation Plan
 
@@ -871,13 +954,25 @@ H-03 registers and governs compatibility around satellite-owned Domain Plane con
 1. Validate all role/subscriber combinations and reject `UNSPECIFIED`.
 2. Load zero, one, and multiple configured satellites without core code changes.
 3. Preserve representative serialized Decision, Price, Volume, and typed skip messages without HACCAM scientific field definitions or mutation; reject only boundary-invalid contract/message metadata.
-4. Verify mirror keys distinguish source satellite, entity, and contract-derived routing identity.
+4. Verify mirror keys distinguish source satellite, source service, contract/version, message identity, and entity without a separate routing identity.
 5. Verify duplicate event ID and scoped sequence regression do not replace last valid mirror.
-6. Verify subscription exact matching for any/source/entity/routing-identity combinations.
+6. Verify subscription exact matching for any source participant/service, message identity, contract/version, and entity-filter combinations.
 7. Verify H-05_def/gov rejects wrong Domain Plane, subscriber capability, and contract version.
 8. Fill one delivery queue and prove mirror updates and another Consumer continue.
 9. Cancel every context path and use goroutine-leak/race tests.
 10. Run `go test -race ./...` and bounded-queue stress tests.
+11. Load `Fin_FeedSat_1`, DSE, and the internal HACCAM `RouterService` into the Registry KB; verify only the first two are Satellites and `RouterService` has no satellite role/type.
+12. Register multiple services for one participant and verify participant, service, endpoint, contract capability, and provider/consumer relationships remain distinct.
+13. Create H-04 intent without valid H-02/H-03 facts and verify no Routing Table row and no delivery result.
+14. Combine valid Registry KB, H-03 compatibility, and subscription facts and verify H-05_def/gov creates the expected concrete source-to-destination row.
+15. Make the contract incompatible and verify route creation fails without scientific inspection.
+16. Disable/remove a Registry KB provider and verify corresponding rows become inactive/removed before further `RouterService` publication.
+17. Verify `RouterService` publishes only through active Routing Table rows and cannot publish from subscription intent alone.
+18. Stall one DSE route and verify another Consumer route continues through isolated bounded queues.
+19. Add a second FeedSat and second Consumer using configuration/contract facts only; verify no new Core scientific code.
+20. Verify all valid routes resolve from concrete participant/service/contract/message/destination/subscription/Domain Plane/entity-filter dimensions with no synthetic route identifier or separate routing identity field.
+21. Verify diagnostics identify an affected route using those concrete dimensions and subscription identity without introducing another namespace.
+22. Corrupt/reject Registry KB input and verify H-08 isolates the Core relationship failure without modifying or stopping external satellite science.
 
 ### 25.2 Real `Fin_FeedSat_1` integration
 
@@ -886,7 +981,7 @@ H-03 registers and governs compatibility around satellite-owned Domain Plane con
 | Producer connectivity | start current FeedSat, then HACCAM | H-01 connects without FeedSat changes |
 | Realtime ingress | enable existing scientific streams | accepted events and H-09 counts appear |
 | Multiple entities | use the FeedSat's current configured entities | each observed entity creates independent keys; no HACCAM source edit |
-| Multiple message identities | receive compatible Decision/Price/Volume events | independent routing-identity mirrors; Finance message set remains satellite-contract evidence, not Core switch logic |
+| Multiple message identities | receive compatible Decision/Price/Volume events | independent service/contract/message/entity mirrors; Finance message set remains satellite-contract evidence, not Core switch logic |
 | H-06 latest state | observe repeated updates | only latest valid value per key remains |
 | Provenance | compare edge event with mirror/delivery | source satellite, entity, event/snapshot/sequence/times retained where supplied |
 | Noninterference | stop HACCAM while FeedSat remains live | FeedSat ingestion/science/publication continues normally |
@@ -959,17 +1054,21 @@ to another Producer, H-06 update, unrelated route, or satellite science.
 +------------------------- one HACCAM Core executable ------------------------+
 |                                                                            |
 | H-01 adapter supervisors --> govern + preserve bytes --> H-06 latest mirror|
-|         |                                      |                |           |
-|         |                                      +--> H-05_deliver queues     |
-|         |                                              ^                    |
-| H-02 Registry ----+                                    |                    |
-| H-03 Contract ----+--> H-05_def/gov <-- H-04 Subscriptions                 |
+|                                                        |                   |
+| H-02 Registry KB --------+                             |                   |
+| H-03 Contract Governance +--> H-05_def/gov             |                   |
+| H-04 Subscription Intent +         |                   |                   |
+|                                    v                   |                   |
+|                              ROUTING TABLE <------------+                   |
+|                                    |                                       |
+|                                    v                                       |
+|                    RouterService / H-05_deliver queues                     |
 |                                                                            |
 | H-07 lifecycle evidence <--- adapters/routes/health                         |
 | H-08 isolation boundaries ---> adapters/events/routes/receivers             |
 | H-09 structured diagnostics <--- every responsibility                       |
 |                                                                            |
-| external gRPC: Matrix delivery + standard health                           |
+| external gRPC: RouterService publication + standard health                 |
 +----------------------------------------------------------------------------+
 ```
 
@@ -979,12 +1078,12 @@ to another Producer, H-06 update, unrelated route, or satellite science.
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | outbound FeedSat adapter | existing gRPC integration boundary; canonical ingress | H-01 | imports `finfeedsat.v1` client edge | per-Producer supervisor/adapter | required/proposed |
 | internal runtime record | generated satellite types remain satellite edge contracts | H-01/H-03 | HACCAM metadata plus governed encoded message | metadata plus immutable bytes; no scientific schema | required/proposed |
-| configured satellite records | Satellite Registry | H-02 | role/type enums approved; no registration RPC | in-memory registry | required/proposed |
+| Registry Knowledgebase | Satellite Registry expanded as Core participant/service knowledge | H-02 | role/type enums only for satellites; no Registry RPC | internal participant, service, endpoint, capability, and evidence indexes | required/proposed |
 | contract catalog | H-03 governs contracts, not science | H-03 | satellite contract/version/message identity | immutable relationship catalog; no scientific interpretation | required/proposed |
 | Consumer interest | WHO wants WHAT | H-04 | `SubscriptionRequest` | stream-scoped in-memory state | required/proposed |
-| route permission | H-02 + H-03 + H-04 determine relationship | H-05_def/gov | no separate RPC | route snapshots | required/proposed |
-| async Consumer delivery | H-06 to H-05_deliver to receiver | H-05_deliver | server stream | bounded per-stream queue | required/proposed |
-| mirror key/value | `(satellite, entity, information type)` conceptual grain | H-06 | routing identity and encoded satellite message | latest-state map/lock; no scientific transform | required/proposed |
+| Routing Table / route governance | H-02 + H-03 + H-04 determine permitted relationship | H-05_def/gov | no separate RPC | dynamic resolved route rows/snapshots | required/proposed |
+| `RouterService` outbound publication | H-06 through active Routing Table rows to receiver | H-05_deliver | `StreamMatrixVisibleInformation` | bounded per-destination queue | required/proposed |
+| mirror key/value | source satellite/service/contract/message/entity conceptual grain | H-06 | source service/contract/message identity and encoded satellite message | latest-state map/lock; no scientific transform | required/proposed |
 | satellite lifecycle view | configured through failed states | H-07 | standard health for Core | sole lifecycle writer | required/proposed |
 | per-path isolation | noninterference rules | H-08 | stream errors/cancellation | supervisor/per-route boundaries | required/proposed |
 | realtime visibility | minimum diagnostics | H-09 | no custom diagnostics proto | structured logs/metrics | required/proposed |
@@ -993,18 +1092,18 @@ to another Producer, H-06 update, unrelated route, or satellite science.
 | physical co-location independence | satellite ontology and governed paths | H-02/H-05 | none | logical identity/routing independent of host/process/device | required/proposed |
 | restart behavior | latest-state mirrors; sophisticated recovery deferred | H-06/H-08 | none | empty in-memory reconstruction | required/proposed |
 
-## 30. New Terms Requiring Human Approval
+## 30. Proto and Internal Naming Status
 
-No new HACCAM architectural term is proposed.
+No Domain Plane or scientific architectural term is proposed. `Registry KB`, `Routing Table`, and `RouterService` clarify conventional responsibilities already assigned to H-02 and H-05; they do not create new H-processes.
 
-| Proposed term | Why existing term is insufficient as an identifier | H-process | Classification | Definition |
+| Term | Why an identifier is needed | H-process | Classification / status | Definition |
 | :--- | :--- | :--- | :--- | :--- |
-| `haccam.v1` | protobuf requires a package namespace | H-03 | proto terminology | first versioned HACCAM edge-contract namespace |
-| `MatrixDeliveryService` | protobuf requires a service identifier for existing H-05 delivery | H-05 | proto terminology | server boundary that executes governed delivery to external Consumers |
-| `StreamMatrixVisibleInformation` | protobuf requires an RPC identifier | H-04/H-05 | proto terminology | creates a stream-scoped subscription and delivers current/live permitted information |
-| `SubscriptionRequest` | protobuf requires a request message identifier | H-04 | proto terminology | boundary expression of WHO wants WHAT |
-| `MatrixVisibleInformation` | protobuf requires a delivery message identifier; phrase already exists architecturally | H-03/H-05/H-06 | proto terminology | HACCAM-owned metadata plus unchanged encoded satellite-owned message; not a new semantic or scientific object |
-| `ContractIdentity` | protobuf requires a compact name/version type | H-03 | proto terminology | exact H-03 contract name and version |
+| `haccam.v1` | protobuf requires a package namespace | H-03 | proto terminology; retained | first versioned HACCAM edge-contract namespace |
+| `RouterService` | protobuf requires a service identifier | H-05_deliver | approved V0.1 proto terminology | HACCAM-owned outbound gRPC publisher using active Routing Table state |
+| `StreamMatrixVisibleInformation` | protobuf requires an RPC identifier | H-04/H-05_def/gov/H-05_deliver | approved V0.1 proto terminology | establishes stream-scoped subscription intent, resolves permitted routes, and publishes current/live permitted information |
+| `SubscriptionRequest` | protobuf requires a request message identifier | H-04 | proto terminology; retained | boundary expression of WHO wants WHAT |
+| `MatrixVisibleInformation` | protobuf requires a delivery message identifier; phrase already exists architecturally | H-03/H-05/H-06 | proto terminology; retained | HACCAM-owned metadata plus unchanged encoded satellite-owned message; not a new semantic or scientific object |
+| `ContractIdentity` | protobuf requires a compact name/version type | H-03 | proto terminology; retained | exact H-03 contract name and version |
 | `connection generation` | source sequence cannot safely span unknown reconnect semantics | H-01 | runtime/internal terminology | in-memory identifier for one adapter connection lifetime; lost on restart |
 
 Package names in the Go inventory are implementation terminology only and require implementation review, not promotion into HACCAM architecture.
@@ -1020,9 +1119,9 @@ Package names in the Go inventory are implementation terminology only and requir
 | initial source commit `1e760ca` | current FeedSat HEAD is `3d763a1` | no | record current evidence date/commit |
 | DS_TransSat required in Prototype V1 | this runtime increment explicitly excludes DS_TransSat implementation | no conflict in ontology; increment scope is narrower | note staged implementation sequence if Process Model is revised |
 
-## 32. Human Review Decisions and Remaining Decisions
+## 32. Human Review Decisions
 
-### 32.1 Resolved architectural decisions
+### 32.1 Previously resolved architectural decisions
 
 | Decision | Resolution |
 | :--- | :--- |
@@ -1032,27 +1131,42 @@ Package names in the Go inventory are implementation terminology only and requir
 | D: satellite-owned scientific contract | RESOLVED. The producing satellite retains ownership; H-03 registers/governs compatibility and relationships around it. |
 | E: HACCAM proto responsibility | RESOLVED. HACCAM proto defines only HACCAM-owned H-01 through H-09 services, metadata, governance, mirror, and delivery constructs. |
 | F: physical co-location | RESOLVED. Location/packaging changes no logical identity, ownership, role, type, contract, or governed path. |
-| G: protobuf vocabulary names | PARTIALLY OPEN. Existing names are retained only where they accurately identify HACCAM-owned responsibilities; approval remains required below. |
+| G: encoded delivery representation | RESOLVED. `encoded_message` carries unchanged satellite-owned serialized protobuf bytes with exact source contract/message identity. |
 
-### 32.2 Remaining decision: approve the proposed HACCAM proto vocabulary
+### 32.2 Registry, Routing Table, and `RouterService` decisions resolved by this correction
 
-- **Issue:** protobuf requires concrete package/service/RPC/message identifiers not fixed by the Process Model.
-- **Process Model position:** H-03 governs semantics; future proto is an implementation expression and edge contract.
-- **Proposed Runtime Design position:** approve `haccam.v1`, `MatrixDeliveryService`, `StreamMatrixVisibleInformation`, `SubscriptionRequest`, `MatrixVisibleInformation`, and `ContractIdentity`.
-- **Alternatives:** different identifiers with identical responsibilities; split subscription management into extra RPCs.
-- **Consequence:** identifiers become a public edge vocabulary; extra RPCs increase lifecycle and consistency surface.
-- **Recommendation:** approve the minimal single-stream boundary as proposed.
+| Decision | Resolution |
+| :--- | :--- |
+| A: Registry scope | RESOLVED. H-02 is the internal HACCAM Registry KB of internal/external service providers/consumers, services, endpoints, capabilities, and lifecycle evidence. |
+| B: Registry network boundary | RESOLVED. H-02 requires no dedicated gRPC/network service in V0.1. |
+| C: Routing Table | RESOLVED. It is separate HACCAM-owned operational route state, not Registry knowledge. |
+| D: route governance | RESOLVED. H-05_def/gov constructs and maintains the Routing Table from H-02 Registry KB, H-03 compatibility, and H-04 intent. |
+| E: `RouterService` responsibility | RESOLVED. `RouterService` is the HACCAM-owned higher-level outbound gRPC publishing service. |
+| F: publication execution | RESOLVED. H-05_deliver executes `RouterService` publication through active Routing Table rows. |
+| G: internal services | RESOLVED. Internal HACCAM services are not Satellites and have no `SatelliteRole` or `SubscriberType`. |
+| H: subscription versus route | RESOLVED. H-04 intent and H-05 Routing Table rows are distinct objects and lifecycle states. |
+| I: scientific semantics | RESOLVED. Registry, routing governance, and `RouterService` publication introduce no scientific meaning or ownership. |
 
-### 32.3 Remaining decision: approve the governed encoded-message field names
+### 32.3 Final Registry/Routing/`RouterService` naming and key decisions
 
-- **Issue:** protobuf still requires names for the transport field and routing identity even though neither is a new architectural/scientific concept.
-- **Process Model position:** HACCAM governs routing/delivery while satellite contracts retain scientific ownership.
-- **Proposed Runtime Design position:** use `encoded_message` for governed serialized protobuf bytes and `routing_identity_id` for the identifier associated with the satellite-owned contract/message identity.
-- **Alternatives:** `serialized_message` and `message_route_id`; no scientific naming alternatives are acceptable.
-- **Consequence:** names become public edge vocabulary and must not imply HACCAM owns message science.
-- **Recommendation:** approve `encoded_message` and `routing_identity_id` as proto-only terminology with the definitions in Section 16.
+| Decision | Resolution |
+| :--- | :--- |
+| Router gRPC service name | RESOLVED: `RouterService` is approved for V0.1. The former candidate `MatrixDeliveryService` and alternative `RoutingService` are rejected for V0.1. |
+| Router RPC name | RESOLVED: `StreamMatrixVisibleInformation` is approved for V0.1. |
+| `route_id` | RESOLVED: NOT USED IN V0.1. A Routing Table row is represented and diagnosed by its concrete governed dimensions. Any future operational-key need requires separate design and review. |
+| `routing_identity_id` | RESOLVED: REMOVED / NOT USED IN V0.1. No replacement identity abstraction is introduced. |
+
+There are no remaining Registry/Routing/`RouterService` architectural decisions open in V0.1.
 
 No DS_TransSat `SubscriberType` decision is required: the Process Model explicitly sets it to `PRODUCER_CONSUMER`.
+
+### 32.4 Human Design Approval
+
+HACCAM Core Runtime System Design V0.1 is **APPROVED** as of 2026-09-09.
+
+This approval freezes the V0.1 runtime architecture defined by this document as the implementation design authority subordinate to the HACCAM Process Model. It establishes the approved baseline for subsequent protobuf and implementation work; it does not authorize that work. Any later material architectural change must be explicitly identified, reviewed against the HACCAM Process Model, approved by a human, and recorded through the project's normal design/change governance. Approved architectural decisions must not be silently changed during implementation.
+
+**Implementation remains NOT YET AUTHORIZED and requires separate explicit human authorization.**
 
 ## 33. Design Completeness / Wholeness Check
 
@@ -1063,7 +1177,7 @@ No DS_TransSat `SubscriberType` decision is required: the Process Model explicit
 | ownership, scientific noninterpretation, and noninterference | yes, Sections 4, 6, 8, 13, 24 |
 | H-01 through H-09 | yes, Sections 6-14 |
 | Producer, Consumer, Producer+Consumer, and co-located logical flow | yes, Section 15 |
-| registry, contracts, subscriptions, routing, mirror | yes, Sections 7-11 |
+| Registry KB, contracts, subscription intent, Routing Table, `RouterService`, mirror | yes, Sections 7-11 |
 | lifecycle, isolation, diagnostics | yes, Sections 12-14 |
 | complete proposed HACCAM-owned proto boundary and governed encoded-message inventory | yes, Section 16 |
 | internal Go organization | yes, Section 17 |
@@ -1073,38 +1187,61 @@ No DS_TransSat `SubscriberType` decision is required: the Process Model explicit
 | validation and exclusions | yes, Sections 25-26 |
 | required ASCII diagrams | yes, Sections 5, 15, 27, 28 |
 | traceability | yes, Section 29 |
-| new terms, resolved decisions, and remaining decisions | yes, Sections 30, 32 |
+| proto/internal naming status and resolved human decisions | yes, Sections 30, 32 |
 | Process Model reconciliation without modifying it | yes, Section 31 |
 
-**Wholeness result:** COMPLETE FOR HUMAN DESIGN REVIEW. Implementation remains unauthorized until the human decisions in Section 32 are resolved and the design is approved.
+**Wholeness result:** COMPLETE AND APPROVED AS HACCAM CORE RUNTIME SYSTEM DESIGN V0.1. Section 32 contains no remaining Registry/Routing/`RouterService` decision. Implementation remains NOT YET AUTHORIZED and requires separate explicit human authorization.
 
 ## Architecture Correction Summary
 
-The V0.1 design now makes the satellite-owned scientific contract the only scientific contract for satellite output. HACCAM accepts, mirrors, and delivers an unchanged serialized satellite-owned protobuf message together with HACCAM-owned governance, routing, provenance, receipt, mirror, and lifecycle metadata. H-01 does not scientifically translate it; H-03 does not interpret or validate its science; H-05 does not alter it; H-06 owns only the mirror record. `google.protobuf.Any`, normalized protobuf timestamps, and the proposed HACCAM-owned Finance delivery contract have been removed. Logical satellite identity and governed paths are explicitly independent of physical co-location.
+H-02 is the internal Registry KB for known internal/external participants, services, endpoints, capabilities, relationships, and lifecycle evidence. It is neither a network service nor the Routing Table. H-05_def/gov derives and maintains the separate dynamic Routing Table from H-02 knowledge, H-03 service/contract/message compatibility, and H-04 subscription intent. H-05_deliver executes publication through the HACCAM-owned, network-capable `RouterService` using only active Routing Table rows and bounded isolated delivery state. `RouterService` and `StreamMatrixVisibleInformation` are the final approved V0.1 service/RPC names.
+
+V0.1 does not use `route_id`, and `routing_identity_id` is removed. No separate route or routing identity namespace exists. Each Routing Table row is represented by concrete source/destination participant and service facts, source satellite where applicable, contract/version, message identity, destination/subscription, Domain Plane, optional exact entity filter, route state, and HACCAM-owned timestamps. No replacement abstraction was introduced.
+
+All prior scientific ownership corrections remain intact: the satellite-owned scientific contract is the only scientific contract for satellite output; HACCAM preserves unchanged encoded bytes; H-01 does not scientifically translate; H-03 does not interpret science; H-05 does not alter science; and H-06 owns only the mirror record. `google.protobuf.Any`, normalized protobuf timestamps, and a HACCAM-owned Finance delivery contract remain excluded.
 
 ### Materially changed sections
 
 - Executive Summary;
-- Sections 2 through 6;
-- Sections 7 through 11;
-- Sections 13 through 19;
-- Sections 22 through 25;
-- Sections 28 through 30;
-- Sections 32 through 34.
+- Section 4, ownership/runtime-record dimensions;
+- Section 5, overall architecture diagram;
+- Sections 7, 8, 10, and 11, Registry KB, contract governance, Routing Table, `RouterService`, and mirror-key terminology;
+- Sections 14 and 15, diagnostics and end-to-end relationships;
+- Sections 16 through 18 and Section 20, proto consequences, Go components, concurrency, and startup;
+- Sections 24 and 25, invariants and validation;
+- Sections 28 through 30, internal structure, traceability, and naming status;
+- Section 32, final human decisions;
+- Section 33, completeness/wholeness check;
+- Architecture Correction Summary;
+- Section 34, change log.
 
 ### Remaining genuine human decisions
 
-1. Approve or rename the proto vocabulary listed in Section 32.2.
-2. Approve or rename the proto-only fields `encoded_message` and `routing_identity_id` in Section 32.3.
+None within the Registry/Routing/`RouterService` scope. Human design approval was recorded on 2026-09-09. Any later implementation authorization remains a separate action.
 
 ### Correction consistency check
 
+- Registry KB is not the Routing Table;
+- the Routing Table is not `RouterService`;
+- H-02 owns the internal knowledgebase and no Registry gRPC service is proposed;
+- H-03 owns HACCAM service/contract/message compatibility governance and does not own or interpret satellite science;
+- H-04 owns subscription intent: WHO wants WHAT;
+- `RouterService` is HACCAM-owned, logically internal, network-capable, and the outbound gRPC publisher;
+- `RouterService` is not a Satellite and has no `SatelliteRole` or `SubscriberType`;
+- H-05_def/gov owns route construction, maintenance, and permission;
+- H-05_deliver owns `RouterService` publication execution and per-destination bounded delivery state;
+- H-04 subscription intent remains distinct from resolved route state;
+- internal HACCAM services are not Satellites;
+- `route_id` is not used in V0.1;
+- `routing_identity_id` is removed, and no replacement routing identity namespace exists;
 - no HACCAM-defined Finance scientific message or scientific contract is proposed;
-- satellite-owned encoded information retains its exact contract/version/message identity and scientific ownership;
+- `encoded_message` remains the unchanged serialized satellite-owned protobuf message governed by exact source contract/version/message identity;
+- satellite-owned encoded information retains its scientific ownership;
 - H-01, H-03, H-05, and H-06 are explicitly prohibited from scientific interpretation or transformation;
+- `google.protobuf.Any` is not part of the active V0.1 design;
 - HACCAM-owned times use `*_unix_ms`; source time remains source-owned and is not normalized;
 - physical host, process, container, pod, application, and device placement do not define satellite identity;
-- the design continues to support `0..N` satellites, entities, and routing/message identities;
+- the design continues to support `0..N` satellites, internal services, routes, entities, services, contracts, and message identities;
 - the Process Model remains the parent architectural authority;
 - V0.1 remains realtime, in-memory, bounded, nonblocking, and implementation-unauthorized.
 
@@ -1114,3 +1251,6 @@ The V0.1 design now makes the satellite-owned scientific contract the only scien
 | :--- | :--- | :--- | :--- |
 | V0.1 | 2026-09-09 | PROPOSED FOR HUMAN REVIEW | Initial complete HACCAM Core realtime runtime design. Defines single-process Go organization, current `Fin_FeedSat_1` adapter evidence, in-memory H-02 through H-07 state, H-08 isolation, H-09 diagnostics, bounded concurrency, startup/shutdown, minimal proposed proto, validation, traceability, reconciliation notes, and human decisions. No implementation authorized. |
 | V0.1 correction | 2026-09-09 | PROPOSED FOR HUMAN REVIEW | Corrected satellite scientific-contract ownership throughout. Removed `google.protobuf.Any`, normalized protobuf timestamps, and the proposed HACCAM-owned Finance delivery contract. Defined governed transport of unchanged satellite-owned serialized protobuf messages with HACCAM-only metadata; constrained H-01/H-03/H-05/H-06 against scientific interpretation; added physical deployment independence, co-location rules, validation, resolved decisions, and correction consistency summary. Implementation remains unauthorized. |
+| V0.1 Registry/Routing correction | 2026-09-09 | PROPOSED FOR HUMAN REVIEW | Defined H-02 as the internal participant/service Registry KB; separated H-04 intent, H-05_def/gov Routing Table ownership, and H-05_deliver Router publication; removed active `routing_identity_id`; added first provider/consumer examples, conceptual route rows, package boundaries, invariants, validation, traceability, and three remaining naming/key decisions. No implementation authorized. |
+| V0.1 final correction | 2026-09-09 | PROPOSED FOR HUMAN REVIEW | Approved `RouterService` and `StreamMatrixVisibleInformation`; rejected `route_id` for V0.1; ratified removal of `routing_identity_id`; corrected semantic-compatibility wording; and completed final terminology, invariant, validation, section-reference, and consistency cleanup. Implementation remains NOT YET AUTHORIZED. |
+| V0.1 approval | 2026-09-09 | APPROVED | Human approval recorded for HACCAM Core Runtime System Design V0.1. The V0.1 runtime architecture is now the approved design baseline subordinate to the HACCAM Process Model. No architectural content was changed by this approval action. Implementation remains NOT YET AUTHORIZED and requires separate explicit human authorization. |
